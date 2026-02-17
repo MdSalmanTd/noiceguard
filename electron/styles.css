@@ -366,6 +366,62 @@ body {
   color: var(--warning);
 }
 
+/* ── VB-Cable Setup Guide ────────────────── */
+
+.setup-guide {
+  margin-top: 0;
+}
+
+.guide-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.guide-ok {
+  background: rgba(0, 204, 136, 0.1);
+  border: 1px solid rgba(0, 204, 136, 0.3);
+  color: var(--accent);
+}
+
+.guide-warn {
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid rgba(255, 170, 0, 0.3);
+  color: var(--warning);
+}
+
+.guide-icon {
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.guide-text {
+  flex: 1;
+}
+
+.guide-text strong {
+  font-weight: 600;
+}
+
+.guide-text em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.guide-text a {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* ── Error Bar ───────────────────────────── */
 
 .error-bar {

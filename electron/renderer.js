@@ -41,6 +41,12 @@ const meterSection = document.getElementById('meterSection');
 const logContainer = document.getElementById('logContainer');
 const logSection = document.getElementById('logSection');
 
+/* VB-Cable setup guide */
+const setupGuide = document.getElementById('setupGuide');
+const vbCableFound = document.getElementById('vbCableFound');
+const vbCableMissing = document.getElementById('vbCableMissing');
+const vbCableLink = document.getElementById('vbCableLink');
+
 /* ── State ───────────────────────────────────────────────────────────────── */
 
 let isRunning = false;
@@ -71,6 +77,9 @@ async function loadDevices() {
 
     populateSelect(inputSelect, devices.inputs, 'input');
     populateSelect(outputSelect, devices.outputs, 'output');
+
+    /* Auto-detect VB-Cable and show setup guide. */
+    detectVBCable(devices.outputs);
 
     hideError();
   } catch (err) {
@@ -364,6 +373,39 @@ function hideError() {
   errorBar.classList.add('hidden');
   errorBar.textContent = '';
 }
+
+/* ── VB-Cable Detection & Auto-Select ────────────────────────────────────── */
+
+/**
+ * Detect VB-Cable in the output device list.
+ * If found: auto-select it and show a green guide.
+ * If not found: show a yellow guide with download link.
+ */
+function detectVBCable(outputDevices) {
+  const cableDevice = outputDevices.find(
+    d => d.name.toLowerCase().includes('cable')
+  );
+
+  if (cableDevice) {
+    /* Auto-select VB-Cable as the output device. */
+    outputSelect.value = String(cableDevice.index);
+    vbCableFound.classList.remove('hidden');
+    vbCableMissing.classList.add('hidden');
+    addLog('VB-Cable detected (device #' + cableDevice.index + '). Auto-selected as output.', 'ok');
+  } else {
+    vbCableFound.classList.add('hidden');
+    vbCableMissing.classList.remove('hidden');
+    addLog('VB-Cable not found. Install it for Zoom/Meet/OBS support.', 'warn');
+  }
+}
+
+/* Open VB-Cable download link in the system browser. */
+vbCableLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (window.noiseGuard.openExternal) {
+    window.noiseGuard.openExternal('https://vb-audio.com/Cable/');
+  }
+});
 
 /* ── Boot ────────────────────────────────────────────────────────────────── */
 

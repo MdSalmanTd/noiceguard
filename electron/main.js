@@ -8,7 +8,7 @@
  * - Ensure clean shutdown of audio engine on app exit
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const { createTray, destroyTray } = require('./tray');
 
@@ -180,5 +180,15 @@ ipcMain.handle('audio:set-vad-threshold', (_event, threshold) => {
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
+  }
+});
+
+/**
+ * app:open-external -> void
+ * Open a URL in the system's default browser (used for VB-Cable download link).
+ */
+ipcMain.handle('app:open-external', (_event, url) => {
+  if (typeof url === 'string' && url.startsWith('https://')) {
+    shell.openExternal(url);
   }
 });

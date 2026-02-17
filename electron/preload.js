@@ -31,4 +31,7 @@ contextBridge.exposeInMainWorld('noiseGuard', {
   /** Set VAD gate threshold [0.0, 1.0]. Higher = more aggressive gating. */
   setVadThreshold: (threshold) =>
     ipcRenderer.invoke('audio:set-vad-threshold', threshold),
+
+  /** Open a URL in the system's default browser. */
+  openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
 });

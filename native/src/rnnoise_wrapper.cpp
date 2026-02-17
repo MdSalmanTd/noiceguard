@@ -1,16 +1,16 @@
 /**
- * Production-grade RNNoise wrapper.
+ * Production-grade RNNoise wrapper with double-pass processing.
  *
- * Improvements over basic passthrough:
- *   1. VAD-gated suppression: When RNNoise's VAD reports low voice probability,
- *      we apply additional attenuation so non-speech sounds (keyboard, fan, etc.)
- *      are silenced even if RNNoise doesn't fully remove them.
- *   2. Soft gain transitions: Gate gain changes are smoothed exponentially over
- *      frames to prevent audible clicks at gate open/close boundaries.
- *   3. Comfort noise: During full silence (gate closed), a tiny amount of shaped
- *      noise is injected so the listener doesn't perceive a "dead channel."
- *   4. Metrics: RMS levels, VAD probability, and frame count are exposed via
- *      atomics for the UI to poll without locks.
+ * Key techniques for Krisp-level silence:
+ *   1. Double-pass RNNoise: Two independent DenoiseState instances process
+ *      each frame in series. Pass 1 removes most noise; pass 2 catches
+ *      residual artifacts the first pass missed.
+ *   2. Asymmetric gate timing: Gate closes FAST (noise cut in ~20ms) but
+ *      opens SLOWLY (voice fades in over ~120ms), preventing word clipping.
+ *   3. Hard noise floor: Samples below -54dB are clamped to exactly zero,
+ *      eliminating the faint hiss that survives RNNoise + gating.
+ *   4. Comfort noise: Tiny shaped noise during full silence so the channel
+ *      doesn't sound "dead" to the listener.
  */
 
 #include "rnnoise_wrapper.h"
@@ -24,30 +24,41 @@
 namespace noiseguard {
 
 /*
- * Gain smoothing coefficient. Controls how fast the gate opens/closes.
- * 0.05 means ~50ms to fully transition at 10ms frame rate (smooth, no clicks).
- * Higher = faster but more prone to artifacts.
+ * Gate ATTACK coefficient (closing = cutting noise).
+ * 0.25 at 10ms frame rate -> gate closes in ~2 frames (~20ms).
+ * Fast attack = noise gets silenced almost instantly.
  */
-static constexpr float kGainSmoothCoeff = 0.08f;
+static constexpr float kGateAttackCoeff = 0.25f;
 
 /*
- * Minimum gate gain. Even when fully gated, allow a tiny amount through
- * so the comfort noise blends naturally.
+ * Gate RELEASE coefficient (opening = letting voice through).
+ * 0.04 at 10ms frame rate -> gate opens over ~12 frames (~120ms).
+ * Slow release = voice fades in naturally, no clipped word onsets.
  */
-static constexpr float kMinGateGain = 0.001f;
+static constexpr float kGateReleaseCoeff = 0.04f;
 
 /*
- * Comfort noise level (RMS). Very quiet: ~-60 dBFS.
- * Just enough to signal "the channel is alive."
+ * Minimum gate gain: TRUE ZERO.
+ * When the gate is fully closed, output is absolute silence.
+ * Comfort noise is added separately after the gate.
+ */
+static constexpr float kMinGateGain = 0.0f;
+
+/*
+ * Comfort noise level (RMS). ~-60 dBFS.
  */
 static constexpr float kComfortNoiseLevel = 0.001f;
 
 /*
- * Hysteresis band for VAD gating. The gate opens when VAD > threshold
- * and closes when VAD < threshold - hysteresis. This prevents rapid
- * on/off toggling when VAD hovers near the threshold.
+ * Hysteresis band for VAD gating (wider = less flicker).
  */
-static constexpr float kVadHysteresis = 0.1f;
+static constexpr float kVadHysteresis = 0.15f;
+
+/*
+ * Hard noise floor. Samples with absolute value below this are zeroed.
+ * ~-54 dBFS -- below audible threshold for most setups.
+ */
+static constexpr float kNoiseFloor = 0.002f;
 
 /* ─── Lifecycle ─────────────────────────────────────────────────────────── */
 
@@ -58,6 +69,7 @@ RNNoiseWrapper::~RNNoiseWrapper() { destroy(); }
 bool RNNoiseWrapper::init() {
   if (state_) destroy();
   state_ = rnnoise_create(nullptr);
+  state2_ = rnnoise_create(nullptr);
   smoothGain_ = 1.0f;
   noiseState_ = 0x12345678;
   metrics_.framesProcessed.store(0, std::memory_order_relaxed);
@@ -65,7 +77,7 @@ bool RNNoiseWrapper::init() {
   metrics_.outputRms.store(0.0f, std::memory_order_relaxed);
   metrics_.vadProbability.store(0.0f, std::memory_order_relaxed);
   metrics_.currentGain.store(1.0f, std::memory_order_relaxed);
-  return state_ != nullptr;
+  return state_ != nullptr && state2_ != nullptr;
 }
 
 void RNNoiseWrapper::destroy() {
@@ -73,12 +85,16 @@ void RNNoiseWrapper::destroy() {
     rnnoise_destroy(state_);
     state_ = nullptr;
   }
+  if (state2_) {
+    rnnoise_destroy(state2_);
+    state2_ = nullptr;
+  }
 }
 
 /* ─── Core Processing ───────────────────────────────────────────────────── */
 
 float RNNoiseWrapper::processFrame(float* frame) {
-  if (!state_) return 0.0f;
+  if (!state_ || !state2_) return 0.0f;
 
   float level = suppressionLevel_.load(std::memory_order_relaxed);
 
@@ -104,8 +120,14 @@ float RNNoiseWrapper::processFrame(float* frame) {
     frame[i] *= 32767.0f;  /* Convert to RNNoise's int16 range. */
   }
 
-  /* ── 3. Run RNNoise ── */
-  float vad = rnnoise_process_frame(state_, frame, frame);
+  /* ── 3. RNNoise pass 1 (primary denoising) ── */
+  float vad1 = rnnoise_process_frame(state_, frame, frame);
+
+  /* ── 4. RNNoise pass 2 (catch residual noise) ── */
+  float vad2 = rnnoise_process_frame(state2_, frame, frame);
+
+  /* Use the higher VAD confidence from either pass. */
+  float vad = std::max(vad1, vad2);
   metrics_.vadProbability.store(vad, std::memory_order_relaxed);
 
   /* Convert back to [-1.0, 1.0]. */
@@ -114,7 +136,7 @@ float RNNoiseWrapper::processFrame(float* frame) {
     frame[i] *= kInvScale;
   }
 
-  /* ── 4. Blend with original based on suppression level ── */
+  /* ── 5. Blend with original based on suppression level ── */
   if (level < 1.0f) {
     float dry = 1.0f - level;
     for (size_t i = 0; i < kRNNoiseFrameSize; i++) {
@@ -122,40 +144,41 @@ float RNNoiseWrapper::processFrame(float* frame) {
     }
   }
 
-  /* ── 5. VAD-based noise gate ── */
+  /* ── 6. VAD-based noise gate ── */
   float vadThresh = vadThreshold_.load(std::memory_order_relaxed);
 
-  /*
-   * Compute target gate gain from VAD probability with hysteresis.
-   * - VAD >= threshold          -> gate fully open (gain = 1.0)
-   * - VAD < threshold - hyst    -> gate closed (gain = kMinGateGain)
-   * - In between                -> proportional gain (soft knee)
-   */
   float targetGain;
   if (vad >= vadThresh) {
     targetGain = 1.0f;
   } else if (vad < vadThresh - kVadHysteresis) {
-    /* Scale residual gain by how far below threshold we are. */
     float ratio = vad / std::max(vadThresh - kVadHysteresis, 0.01f);
     targetGain = kMinGateGain + ratio * (1.0f - kMinGateGain);
     targetGain = std::max(targetGain, kMinGateGain);
   } else {
-    /* Hysteresis band: maintain current direction, mild attenuation. */
     float ratio = (vad - (vadThresh - kVadHysteresis)) / kVadHysteresis;
     targetGain = kMinGateGain + ratio * (1.0f - kMinGateGain);
   }
 
-  /* ── 6. Smooth gain transition (exponential moving average) ── */
-  smoothGain_ += kGainSmoothCoeff * (targetGain - smoothGain_);
+  /* ── 7. Asymmetric gain smoothing (fast close, slow open) ── */
+  float coeff = (targetGain < smoothGain_) ? kGateAttackCoeff : kGateReleaseCoeff;
+  smoothGain_ += coeff * (targetGain - smoothGain_);
   smoothGain_ = std::clamp(smoothGain_, kMinGateGain, 1.0f);
   metrics_.currentGain.store(smoothGain_, std::memory_order_relaxed);
 
-  /* Apply gate gain to the processed frame. */
+  /* Apply gate gain. */
   for (size_t i = 0; i < kRNNoiseFrameSize; i++) {
     frame[i] *= smoothGain_;
   }
 
-  /* ── 7. Comfort noise (when gated low) ── */
+  /* ── 8. Hard noise floor clamp (force true silence) ── */
+  float floorThresh = kNoiseFloor * std::max(smoothGain_, 0.01f);
+  for (size_t i = 0; i < kRNNoiseFrameSize; i++) {
+    if (std::abs(frame[i]) < floorThresh) {
+      frame[i] = 0.0f;
+    }
+  }
+
+  /* ── 9. Comfort noise (when gated low) ── */
   if (comfortNoiseEnabled_.load(std::memory_order_relaxed) &&
       smoothGain_ < 0.1f) {
     float comfortScale = (0.1f - smoothGain_) / 0.1f;
@@ -164,7 +187,7 @@ float RNNoiseWrapper::processFrame(float* frame) {
     }
   }
 
-  /* ── 8. Final output RMS ── */
+  /* ── 10. Final output RMS ── */
   float outputRms = computeRms(frame, kRNNoiseFrameSize);
   metrics_.outputRms.store(outputRms, std::memory_order_relaxed);
   metrics_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
@@ -207,11 +230,9 @@ float RNNoiseWrapper::computeRms(const float* buf, size_t len) {
 }
 
 float RNNoiseWrapper::comfortNoiseSample() {
-  /* xorshift32 PRNG -- fast, no allocation, deterministic. */
   noiseState_ ^= noiseState_ << 13;
   noiseState_ ^= noiseState_ >> 17;
   noiseState_ ^= noiseState_ << 5;
-  /* Map to [-1, 1] then scale to comfort level. */
   float sample = static_cast<float>(static_cast<int32_t>(noiseState_)) /
                  2147483648.0f;
   return sample * kComfortNoiseLevel;

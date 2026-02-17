@@ -3,12 +3,12 @@
  *
  * RNNoise processes exactly 480 float samples per frame (10ms @ 48kHz).
  * This wrapper adds:
- *   - VAD-based noise gate: when RNNoise reports low voice probability,
- *     apply additional attenuation to silence non-speech sounds.
- *   - Soft gain transitions: smooth gain changes over frames to avoid clicks.
- *   - Comfort noise: inject low-level noise during silence to avoid
- *     the unnatural "dead air" effect.
- *   - Metrics: input RMS, output RMS, VAD probability, frame counter.
+ *   - Double-pass RNNoise: two independent DenoiseState instances process
+ *     each frame sequentially. The second pass catches residual noise.
+ *   - VAD-based noise gate with asymmetric timing (fast close, slow open).
+ *   - Hard noise floor clamp to force true silence.
+ *   - Comfort noise injection during gated silence.
+ *   - Real-time metrics (input/output RMS, VAD, gate gain, frame count).
  *
  * REAL-TIME RULES:
  * - processFrame() does NO allocations -- pure arithmetic, fixed loops.
@@ -51,10 +51,10 @@ class RNNoiseWrapper {
   RNNoiseWrapper(const RNNoiseWrapper&) = delete;
   RNNoiseWrapper& operator=(const RNNoiseWrapper&) = delete;
 
-  /** Initialize the RNNoise state. Returns true on success. */
+  /** Initialize both RNNoise states. Returns true on success. */
   bool init();
 
-  /** Destroy the RNNoise state. */
+  /** Destroy both RNNoise states. */
   void destroy();
 
   /**
@@ -62,10 +62,13 @@ class RNNoiseWrapper {
    *
    * Pipeline per frame:
    *   1. Measure input RMS
-   *   2. Run RNNoise (returns VAD probability)
-   *   3. Apply VAD-based noise gate with soft gain transition
-   *   4. Optionally inject comfort noise during silence
-   *   5. Measure output RMS, update metrics
+   *   2. Run RNNoise pass 1 (primary denoising)
+   *   3. Run RNNoise pass 2 (catches residual noise)
+   *   4. Blend with original based on suppression level
+   *   5. Apply VAD-based noise gate (asymmetric: fast close, slow open)
+   *   6. Hard noise floor clamp (force true silence)
+   *   7. Inject comfort noise during gated silence
+   *   8. Measure output RMS, update metrics
    *
    * Returns the RNNoise VAD probability [0.0, 1.0].
    */
@@ -77,8 +80,7 @@ class RNNoiseWrapper {
 
   /**
    * Set VAD gate threshold [0.0 .. 1.0].
-   * Frames with VAD below this are attenuated toward silence.
-   * Default: 0.5. Higher = more aggressive gating.
+   * Default: 0.65. Higher = more aggressive gating.
    */
   void setVadThreshold(float threshold);
   float getVadThreshold() const;
@@ -92,20 +94,21 @@ class RNNoiseWrapper {
   const AudioMetrics& metrics() const { return metrics_; }
 
  private:
+  /* Two RNNoise instances for double-pass processing. */
   DenoiseState* state_ = nullptr;
+  DenoiseState* state2_ = nullptr;
 
   /* Suppression level [0..1]. Atomic for lock-free UI updates. */
   std::atomic<float> suppressionLevel_{1.0f};
 
   /* VAD gate threshold. Frames with VAD < threshold get attenuated. */
-  std::atomic<float> vadThreshold_{0.5f};
+  std::atomic<float> vadThreshold_{0.65f};
 
   /* Comfort noise toggle. */
   std::atomic<bool> comfortNoiseEnabled_{true};
 
   /**
-   * Smoothed gate gain. Transitions slowly to avoid clicks.
-   * Updated each frame toward the target gain derived from VAD.
+   * Smoothed gate gain with asymmetric timing.
    * NOT atomic -- only touched from the processing thread.
    */
   float smoothGain_ = 1.0f;
@@ -116,10 +119,7 @@ class RNNoiseWrapper {
   /* Metrics updated every frame. */
   AudioMetrics metrics_;
 
-  /* Generate a single comfort noise sample [-1, 1] scaled to a very low level. */
   float comfortNoiseSample();
-
-  /* Compute RMS of a buffer. */
   static float computeRms(const float* buf, size_t len);
 };
 

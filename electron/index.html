@@ -67,6 +67,26 @@
       </select>
     </section>
 
+    <!-- VB-Cable Setup Guide -->
+    <section class="section setup-guide" id="setupGuide">
+      <div id="vbCableFound" class="guide-banner guide-ok hidden">
+        <span class="guide-icon">&#10003;</span>
+        <div class="guide-text">
+          <strong>VB-Cable detected &amp; selected.</strong>
+          In Zoom/Meet/OBS, set your microphone to <em>"CABLE Output"</em>.
+        </div>
+      </div>
+      <div id="vbCableMissing" class="guide-banner guide-warn hidden">
+        <span class="guide-icon">!</span>
+        <div class="guide-text">
+          <strong>VB-Cable not found.</strong>
+          To use with Zoom/Meet/OBS, install VB-Cable (free):
+          <a id="vbCableLink" href="#">vb-audio.com/Cable</a>
+          <br>Then restart NoiseGuard. It will be auto-selected.
+        </div>
+      </div>
+    </section>
+
     <!-- Suppression Level -->
     <section class="section">
       <div class="slider-header">
@@ -85,10 +105,10 @@
     <section class="section">
       <div class="slider-header">
         <h2>Voice Gate Sensitivity</h2>
-        <span id="vadThreshValue" class="level-value">50%</span>
+        <span id="vadThreshValue" class="level-value">65%</span>
       </div>
       <input type="range" id="vadThreshSlider" class="level-slider vad-slider"
-             min="0" max="100" value="50" step="1">
+             min="0" max="100" value="65" step="1">
       <div class="slider-labels">
         <span>Loose</span>
         <span>Aggressive</span>
