@@ -290,8 +290,8 @@ void AudioEngine::closeStreams() {
 
 int AudioEngine::captureCallback(const void* input, void* /*output*/,
                                  unsigned long frameCount,
-                                 const void* /*timeInfo*/,
-                                 unsigned long statusFlags,
+                                 const PaStreamCallbackTimeInfo* /*timeInfo*/,
+                                 PaStreamCallbackFlags statusFlags,
                                  void* userData) {
   /*
    * REAL-TIME SAFE: This runs on PortAudio's high-priority audio thread.
@@ -327,8 +327,8 @@ int AudioEngine::captureCallback(const void* input, void* /*output*/,
 
 int AudioEngine::outputCallback(const void* /*input*/, void* output,
                                 unsigned long frameCount,
-                                const void* /*timeInfo*/,
-                                unsigned long statusFlags,
+                                const PaStreamCallbackTimeInfo* /*timeInfo*/,
+                                PaStreamCallbackFlags statusFlags,
                                 void* userData) {
   /*
    * REAL-TIME SAFE: Same rules as captureCallback.

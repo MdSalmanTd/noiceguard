@@ -30,6 +30,8 @@
 
 /* Forward-declare PortAudio types to avoid including portaudio.h in this header. */
 typedef void PaStream;
+struct PaStreamCallbackTimeInfo;
+typedef unsigned long PaStreamCallbackFlags;
 
 namespace noiseguard {
 
@@ -97,8 +99,8 @@ class AudioEngine {
    */
   static int captureCallback(const void* input, void* output,
                              unsigned long frameCount,
-                             const void* timeInfo,
-                             unsigned long statusFlags,
+                             const PaStreamCallbackTimeInfo* timeInfo,
+                             PaStreamCallbackFlags statusFlags,
                              void* userData);
 
   /**
@@ -107,8 +109,8 @@ class AudioEngine {
    */
   static int outputCallback(const void* input, void* output,
                             unsigned long frameCount,
-                            const void* timeInfo,
-                            unsigned long statusFlags,
+                            const PaStreamCallbackTimeInfo* timeInfo,
+                            PaStreamCallbackFlags statusFlags,
                             void* userData);
 
   /** Processing thread entry point. Reads capture -> RNNoise -> output ring. */

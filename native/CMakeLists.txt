@@ -13,6 +13,17 @@
 cmake_minimum_required(VERSION 3.20)
 project(noiseguard_deps LANGUAGES C CXX)
 
+# Allow FetchContent subprojects (e.g. PortAudio) that use cmake_minimum_required(< 3.5)
+# when using CMake 4.x, which removed compatibility with older version requirements.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+
+# Set install prefix BEFORE FetchContent so PortAudio's install() uses our local path.
+# Default to deps/install relative to project root if not set via command line.
+if(NOT CMAKE_INSTALL_PREFIX OR CMAKE_INSTALL_PREFIX STREQUAL "")
+  get_filename_component(PROJECT_ROOT "${CMAKE_SOURCE_DIR}" DIRECTORY)
+  set(CMAKE_INSTALL_PREFIX "${PROJECT_ROOT}/deps/install" CACHE PATH "Install prefix" FORCE)
+endif()
+
 include(FetchContent)
 
 # ── PortAudio ────────────────────────────────────────────────────────────────
@@ -37,9 +48,10 @@ FetchContent_MakeAvailable(portaudio)
 
 # ── RNNoise ──────────────────────────────────────────────────────────────────
 # Use the CMake-ready fork.
+# Use Mumble's fork: MSVC-friendly (USE_MALLOC for VLAs), same public API (rnnoise.h).
 FetchContent_Declare(
   rnnoise
-  GIT_REPOSITORY https://github.com/xiph/rnnoise.git
+  GIT_REPOSITORY https://github.com/mumble-voip/rnnoise.git
   GIT_TAG        master
   GIT_SHALLOW    TRUE
 )
@@ -47,21 +59,25 @@ FetchContent_GetProperties(rnnoise)
 if(NOT rnnoise_POPULATED)
   FetchContent_Populate(rnnoise)
 
-  # RNNoise doesn't have a CMakeLists.txt, so we build it manually.
-  # Gather all .c source files from the rnnoise src directory.
   file(GLOB RNNOISE_SOURCES "${rnnoise_SOURCE_DIR}/src/*.c")
 
   add_library(rnnoise STATIC ${RNNOISE_SOURCES})
-  target_include_directories(rnnoise PUBLIC "${rnnoise_SOURCE_DIR}/include")
-
-  # RNNoise needs these defines for the bundled model weights.
-  target_compile_definitions(rnnoise PRIVATE
-    HAVE_CONFIG_H=0
-    COMPILE_OPUS=0
+  target_include_directories(rnnoise
+    PUBLIC "${rnnoise_SOURCE_DIR}/include"
+    PRIVATE "${rnnoise_SOURCE_DIR}/src"
   )
 
-  # Suppress warnings in third-party code.
+  # Do not define HAVE_CONFIG_H so that #ifdef HAVE_CONFIG_H in source skips config.h.
+  # COMPILE_OPUS=0: use bundled model.
+  # USE_MALLOC: use malloc instead of VLAs (required for MSVC; Mumble fork supports this).
+  target_compile_definitions(rnnoise PRIVATE
+    COMPILE_OPUS=0
+    USE_MALLOC
+  )
+
+  # MSVC: expose M_PI from math.h and suppress warnings.
   if(MSVC)
+    target_compile_definitions(rnnoise PRIVATE _USE_MATH_DEFINES)
     target_compile_options(rnnoise PRIVATE /W0)
   else()
     target_compile_options(rnnoise PRIVATE -w)
@@ -69,32 +85,28 @@ if(NOT rnnoise_POPULATED)
 endif()
 
 # ── Install targets so binding.gyp can find them ─────────────────────────────
-# Headers and libs go to deps/install/{include,lib}
-set(INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/../deps/install" CACHE PATH "Install prefix")
+# Headers and libs go to CMAKE_INSTALL_PREFIX/{include,lib} (set above).
+# PortAudio's install() commands will use CMAKE_INSTALL_PREFIX automatically.
+# We add our own install() for RNNoise headers and to ensure PortAudio libs are copied.
 
 install(TARGETS portaudio_static
-  ARCHIVE DESTINATION "${INSTALL_PREFIX}/lib"
-  LIBRARY DESTINATION "${INSTALL_PREFIX}/lib"
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
 )
 
 install(TARGETS rnnoise
-  ARCHIVE DESTINATION "${INSTALL_PREFIX}/lib"
-  LIBRARY DESTINATION "${INSTALL_PREFIX}/lib"
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
 )
 
-# Copy headers.
-install(DIRECTORY "${portaudio_SOURCE_DIR}/include/"
-  DESTINATION "${INSTALL_PREFIX}/include/portaudio"
-  FILES_MATCHING PATTERN "*.h"
-)
-
+# Copy headers (PortAudio's install already handles its headers, but we ensure RNNoise).
 install(DIRECTORY "${rnnoise_SOURCE_DIR}/include/"
-  DESTINATION "${INSTALL_PREFIX}/include/rnnoise"
+  DESTINATION include/rnnoise
   FILES_MATCHING PATTERN "*.h"
 )
 
-# Also copy WASAPI-specific header from PortAudio.
+# Also copy WASAPI-specific header from PortAudio (if PortAudio's install missed it).
 install(FILES "${portaudio_SOURCE_DIR}/src/hostapi/wasapi/pa_win_wasapi.h"
-  DESTINATION "${INSTALL_PREFIX}/include/portaudio"
+  DESTINATION include/portaudio
   OPTIONAL
 )
