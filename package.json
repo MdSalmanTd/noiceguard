@@ -7,7 +7,8 @@
     "start": "electron .",
     "dev": "electron .",
     "build:native": "powershell -ExecutionPolicy Bypass -File ./scripts/build-native.ps1",
-    "rebuild:electron": "electron-rebuild -f -w noiseguard"
+    "rebuild:electron": "electron-rebuild -f -w noiseguard",
+    "pack:win": "npm run build:native && npm run rebuild:electron && electron-builder --win nsis"
   },
   "keywords": ["noise-cancellation", "rnnoise", "electron", "portaudio", "wasapi"],
   "author": "",
@@ -18,7 +19,32 @@
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",
     "electron": "^33.0.0",
+    "electron-builder": "^26.0.12",
     "node-gyp": "^12.1.0"
+  },
+  "build": {
+    "appId": "com.noiseguard.app",
+    "productName": "NoiseGuard",
+    "asar": true,
+    "asarUnpack": [
+      "build/Release/*.node"
+    ],
+    "files": [
+      "electron/**/*",
+      "build/Release/*.node",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   },
   "engines": {
     "node": ">=20.0.0"

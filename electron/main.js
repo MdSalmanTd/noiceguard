@@ -9,13 +9,23 @@
  */
 
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { createTray, destroyTray } = require('./tray');
 
 /* ── Load native addon ─────────────────────────────────────────────────────── */
 let addon;
 try {
-  addon = require('../build/Release/noiseguard.node');
+  const addonCandidates = [
+    path.join(__dirname, '..', 'build', 'Release', 'noiseguard.node'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'build', 'Release', 'noiseguard.node'),
+    path.join(process.resourcesPath || '', 'build', 'Release', 'noiseguard.node'),
+  ];
+  const addonPath = addonCandidates.find((p) => p && fs.existsSync(p));
+  if (!addonPath) {
+    throw new Error(`noiseguard.node not found. Checked: ${addonCandidates.join(', ')}`);
+  }
+  addon = require(addonPath);
 } catch (err) {
   console.error('Failed to load native addon:', err.message);
   console.error('Did you run "npm run build:native" first?');

@@ -236,7 +236,7 @@ Write-Host "[3/3] Building native addon with node-gyp..." -ForegroundColor Yello
 
 # node-gyp needs a valid Visual Studio environment. When VS is in a non-standard path
 # (e.g. VS 18 under "18\BuildTools"), run node-gyp from a shell that has vcvars64.bat
-# applied so VCINSTALLDIR is set and node-gyp uses that (node-gyp 12.1+ supports VS 2026).
+# applied so VCINSTALLDIR is set and node-gyp uses that.
 $vcvars64 = $null
 if ($vs18Path -and (Test-Path $vs18Path)) {
     $vcvars64 = Join-Path $vs18Path "VC\Auxiliary\Build\vcvars64.bat"
@@ -252,13 +252,13 @@ $nodeGypOk = $false
 
 if ($vcvars64) {
     Write-Host "  Using VS environment (vcvars) for node-gyp..." -ForegroundColor Gray
-    $nodeGypCmd = "call `"$vcvars64`" && cd /d `"$nativeDir`" && npx node-gyp rebuild --release --msvs_version=2026"
+    $nodeGypCmd = "call `"$vcvars64`" && cd /d `"$nativeDir`" && npx node-gyp rebuild --release --msvs_version=2022 --clang=0"
     cmd /c $nodeGypCmd
     $nodeGypOk = ($LASTEXITCODE -eq 0)
 } else {
     Push-Location $nativeDir
     try {
-        npx node-gyp rebuild --release --msvs_version=2026
+        npx node-gyp rebuild --release --msvs_version=2022 --clang=0
         $nodeGypOk = ($LASTEXITCODE -eq 0)
     } finally {
         Pop-Location
@@ -267,7 +267,7 @@ if ($vcvars64) {
 
 if (-not $nodeGypOk) {
     Write-Host "node-gyp build failed!" -ForegroundColor Red
-    Write-Host "  Ensure node-gyp is 12.1+ (npm install node-gyp@^12.1.0) for VS 2026 support." -ForegroundColor Yellow
+    Write-Host "  Ensure node-gyp is installed and Visual Studio Build Tools C++ workload is present." -ForegroundColor Yellow
     exit 1
 }
 
