@@ -144,7 +144,7 @@ noiseguard/
 
 ### 4. RNNoise Wrapper (`native/src/rnnoise.cpp`)
 
-- Manages `DenoiseState*` lifecycle
+- Manages `DenoiseState`\* lifecycle
 - `processFrame(float* frame)` -- processes exactly 480 samples in-place
 - Noise level gating: multiplies RNNoise VAD output by user-controlled suppression level
 - Thread-safe level update via `std::atomic<float>`
@@ -164,13 +164,13 @@ noiseguard/
 
 ### 7. Build System
 
-`**binding.gyp**` links against:
+`**binding.gyp` links against:
 
 - Pre-built PortAudio (downloaded or built via CMake)
 - Pre-built RNNoise static lib (built via CMakeLists.txt)
 - Windows libs: `ole32.lib`, `winmm.lib`, `uuid.lib` (for WASAPI/COM)
 
-`**scripts/build-native.ps1**`:
+`**scripts/build-native.ps1`:
 
 1. Clone/fetch PortAudio and RNNoise into `deps/`
 2. CMake configure + build both as static libs

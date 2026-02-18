@@ -152,6 +152,8 @@ Napi::Value GetMetrics(const Napi::CallbackInfo& info) {
       static_cast<double>(m.currentGain.load(std::memory_order_relaxed))));
   result.Set("framesProcessed", Napi::Number::New(env,
       static_cast<double>(m.framesProcessed.load(std::memory_order_relaxed))));
+  result.Set("noiseFloor", Napi::Number::New(env,
+      static_cast<double>(m.noiseFloor.load(std::memory_order_relaxed))));
 
   return result;
 }
